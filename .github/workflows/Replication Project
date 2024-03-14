@@ -1,1 +1,325 @@
+breed [blinds blind]
+breed [indifferents indifferent]
+breed [spectators spectator]
+breed [actives active]
+breed [evangelists evangelist]
 
+globals [
+  current-n-blinds
+  current-n-indifferents
+  current-n-spectators
+  current-n-actives
+  current-n-evangelists
+  current-n-green
+  global-resource-consumption
+  global-resource-production
+  global-resource-use
+  delta-resource
+  elementar-unit
+  elementar-unit-number
+  total-agent-number
+  green-fraction
+  sustainability-tipping-point
+  unsustainability-tipping-point]
+
+turtles-own [
+  awareness
+  initial-individual-resource-consumption
+  own-resource-consumption
+  own-resource-production
+  old-own-resource-consumption
+  delta-individual-consumption
+  resource-reduction-goal
+  metering
+  feedback
+  comparison
+  suggestion
+  reinforcement
+  green-competition-index]
+
+to setup
+  ca
+  random-seed seed
+  set total-agent-number (number-of-blinds + number-of-indifferents + number-of-spectators + number-of-actives + number-of-evangelists)
+
+  ; consumption initialization
+  set elementar-unit-number  (number-of-blinds * 1.4 + number-of-indifferents * 1.3 + number-of-spectators * 1.2 + number-of-actives * 1.1  + number-of-evangelists * 1)
+  set elementar-unit initial-global-resource-consumption / elementar-unit-number
+
+  ; creating different types of agents
+  create-blinds number-of-blinds [
+    set awareness 0
+    set initial-individual-resource-consumption elementar-unit * 1.4
+  ]
+  create-indifferents number-of-indifferents [
+    set awareness 8
+    set initial-individual-resource-consumption elementar-unit * 1.3
+  ]
+  create-spectators number-of-spectators [
+    set awareness 16
+    set initial-individual-resource-consumption elementar-unit * 1.2
+  ]
+  create-actives number-of-actives [
+    set awareness 100
+    set initial-individual-resource-consumption elementar-unit * 1.1
+  ]
+  create-evangelists number-of-evangelists [
+    set awareness 2000
+    set initial-individual-resource-consumption elementar-unit
+    set own-resource-production (initial-individual-resource-consumption * 0.02)
+  ]
+
+  ask turtles [
+    set own-resource-consumption initial-individual-resource-consumption
+    find-spot
+  ]
+
+  ; all breed besides blinds, set up green-compeition-index
+  ask turtles with [breed != blinds][set green-competition-index (1 - (1 / awareness - 8))]
+
+  ; setup metering, feedback, suggestins, and comparison as T/F
+  ask turtles [ifelse metering-availability [set metering true][set metering false]
+               ifelse individual-feedback [set feedback true][set feedback false]
+               ifelse neighbor-comparison [set comparison true][set comparison false]
+               ifelse Tips&Tricks [set suggestion true] [set suggestion false]
+  ]
+
+  ; give breeds specific shape and color
+  give-shape-color
+
+  ; set-up STP and UTP
+  set sustainability-tipping-point false
+  set unsustainability-tipping-point false
+  reset-ticks
+end
+
+
+; if there's already a turtle in the random xy, find a new unoccupied xy
+to find-spot
+  set xcor random-pxcor
+  set ycor random-pycor
+  while [any? other turtles-here] [ rt random-float 360 fd random-float 10 ]
+  move-to patch-here
+end
+
+
+; give specific shape and color to each breed
+to give-shape-color
+  ask blinds [set shape "x" set color red]
+  ask indifferents [set shape "triangle" set color brown]
+  ask spectators [set shape "square" set color yellow]
+  ask actives [set shape "pentagon" set color green]
+  ask evangelists [set shape "circle" set color blue]
+end
+
+
+
+to go
+  ; number of current green agents -> actives and evangelists
+  set current-n-green count turtles with [breed = actives or breed = evangelists]
+
+  ; ratio of green agents to total agents; this and tick were here in the original model, but we might be able to put this and tick at the end after social-reinforcemet
+  set green-fraction current-N-green / total-agent-number
+  tick
+
+  ; custom procedures
+  update-awareness
+  update-breeds
+  count-current-breed
+  give-shape-color
+  update-reduction-goal
+  update-consumption
+  social-reinforcement
+
+  ; what to do when the reduction goal is reached
+  if global-resource-use <= (initial-global-resource-consumption - (initial-global-resource-consumption * reduction-goal) / 100)
+    [ output-print "Overall reduction goal has been reached"
+      output-type "Social norm about sustainability is " output-type sustainability-tipping-point
+  stop]
+end
+
+
+; awareness increases when green people are nearby and decrease when blinds are nearby
+;; evangelists do not increase or decrease their awareness
+to update-awareness
+  ask blinds [
+    if any? evangelists in-radius 4 or any? actives in-radius 2
+      [ set awareness (awareness + 1) ]
+    if any? blinds in-radius 2
+      [ set awareness (awareness - 2) ]
+  ]
+
+  ask indifferents [
+    if any? evangelists in-radius 4 or any? actives in-radius 2
+      [ set awareness (awareness + 1) ]
+    if any? blinds in-radius 2
+      [ set awareness (awareness - 1) ]
+  ]
+
+  ask spectators [
+    if any? evangelists in-radius 4 or any? actives in-radius 2
+      [ set awareness (awareness + 1) ]
+    if any? blinds in-radius 2
+      [ set awareness (awareness - 1) ]
+    if green-fraction > 0.3
+      [ set awareness (awareness + 1)]
+  ]
+
+  ask actives [
+    if any? evangelists in-radius 4
+      [ set awareness (awareness + 2)]
+    if green-fraction > 0.8
+      [set awareness (awareness + 1)]
+  ]
+
+  ask turtles with [ breed != evangelists ]
+    [ set awareness (awareness + reinforcement) ]
+end
+
+
+; boundaries for classification of breeds
+to update-breeds
+  ask turtles [
+    if awareness < 8 [ set breed blinds ]
+    if awareness >= 8 and awareness < 16 [ set breed indifferents ]
+    if awareness >= 16 and awareness < 100 [ set breed spectators ]
+    if awareness >= 100 and awareness < 2000 [ set breed actives ]
+    if awareness >= 2000 [ set breed evangelists ]
+  ]
+end
+
+
+; number of each breed per tick
+to count-current-breed
+  set current-N-blinds count turtles with [ breed = blinds ]
+  set current-N-indifferents count turtles with [ breed = indifferents ]
+  set current-N-spectators count turtles with [ breed = spectators ]
+  set current-N-actives count turtles with [ breed = actives ]
+  set current-N-evangelists count turtles with [ breed = evangelists ]
+end
+
+
+; reduction goal updated based on breed and whether metering and comparison are true/false
+to update-reduction-goal
+  ask blinds [ set resource-reduction-goal (initial-individual-resource-consumption * -0.01) ]
+
+  ; when metering is true, but comparison is false
+  ask indifferents with [ metering and not comparison ] [ set resource-reduction-goal 0 ]
+  ask spectators with [ metering and not comparison] [ set resource-reduction-goal (own-resource-consumption * 0.001) ]
+  ask actives with [ metering and not comparison ] [ set resource-reduction-goal (own-resource-consumption * 0.05) ]
+  ask evangelists with [ metering and not comparison ] [ set resource-reduction-goal (own-resource-consumption * 0.15) ]
+
+  ; when metering is true and comparison is true
+  ask turtles with [ breed != blinds and breed != evangelists and metering and comparison ]
+    [ set resource-reduction-goal ((own-resource-consumption - minimal-consumption) * green-competition-index) ]
+  ask evangelists with [ metering and comparison ]
+    [ set resource-reduction-goal (own-resource-consumption - (minimal-consumption * 0.95)) ]
+end
+
+
+; minimum consumption value by a turtle in the world
+to-report minimal-consumption
+  ifelse min [ own-resource-consumption ] of turtles != initial-individual-resource-consumption
+    [ report min [ own-resource-consumption ] of turtles ]
+    [ report initial-individual-resource-consumption * 0.95 ]
+end
+
+
+; updating consumption of each breed per tick; changes based on if metering, suggestion, and feedback are true/false
+to update-consumption
+  let old-resource-use global-resource-use
+
+  ; setting up individual resource consumption
+  update-individual-resource-consumption
+
+  ; setting up global resource consumption
+  set global-resource-consumption (sum [ own-resource-consumption ] of turtles)
+  set global-resource-production (sum [ own-resource-production ] of evangelists)
+  set global-resource-use (global-resource-consumption - global-resource-production)
+
+  ; ratio of the difference between the current and old GRU to current GRU
+  set delta-resource ((global-resource-use - old-resource-use) / global-resource-use)
+
+end
+
+
+to update-individual-resource-consumption
+  ; resource-use memory
+  ask turtles [ set old-own-resource-consumption own-resource-consumption ]
+
+  ; when no metering, blinds consume more and indifferents consume the same the entire time
+  ask blinds [ set own-resource-consumption (own-resource-consumption - (resource-reduction-goal * 0.1)) ]
+  ask indifferents [ set own-resource-consumption initial-individual-resource-consumption]
+
+  ; when there's metering but no feedback or suggestion
+  ask turtles with [ metering and not feedback and not suggestion ]
+      [ set own-resource-consumption (own-resource-consumption - (resource-reduction-goal * 0.01))]
+
+  ; when there's metering and suggestion, but no feedback
+  ask turtles with [ metering and not feedback and suggestion ]
+    [ set own-resource-consumption (own-resource-consumption - (resource-reduction-goal * 0.02)) ]
+
+  ; when there's metering and feedback, but no suggestion
+  ask turtles with [ metering and feedback and not suggestion ] [
+    if breed = spectators [set own-resource-consumption (own-resource-consumption - (resource-reduction-goal * 0.0125)) ]
+    if breed = actives [ set own-resource-consumption (own-resource-consumption - (resource-reduction-goal * 0.025)) ]
+    if breed = evangelists [ set own-resource-consumption (own-resource-consumption - (resource-reduction-goal * 0.05)) ]
+  ]
+
+  ; when there's metering, suggestion, and feedback
+  ask turtles with [ metering and suggestion and feedback ] [
+    if breed = spectators [ set own-resource-consumption (own-resource-consumption - (resource-reduction-goal * 0.025)) ]
+    if breed = actives [ set own-resource-consumption (own-resource-consumption - (resource-reduction-goal * 0.05)) ]
+    if breed = evangelists [ set own-resource-consumption (own-resource-consumption - (resource-reduction-goal * 0.1)) ]
+  ]
+
+    ; getting change in individual consumption; own-resource-production is 0 for everyone but evangelists
+    ask turtles [
+      set delta-individual-consumption ((own-resource-consumption - old-own-resource-consumption - own-resource-production) / own-resource-consumption)
+    ]
+
+    ; producing resources for evangelists
+    ask evangelists [
+      set own-resource-production (own-resource-consumption * 0.02)
+    ]
+end
+
+
+; setting social reinforcements, or how neighbors and global trends impact awareness; +1 good, 0 neutral, -1/-2 bad
+to social-reinforcement
+  ask blinds [
+    ifelse (delta-resource > 0) and (delta-individual-consumption > 0 )
+      [ set reinforcement -1 ]
+      [ set reinforcement 0 ]
+  ]
+
+  ask turtles with [ breed = indifferents or breed = spectators ] [
+    if (delta-resource < 0 ) and (delta-individual-consumption < 0) and (abs delta-resource > abs delta-individual-consumption)
+      [ set reinforcement 1 ]
+    if (delta-resource > 0 ) and (delta-individual-consumption > 0) and (abs delta-resource > abs delta-individual-consumption)
+      [ set reinforcement 1 ]
+  ]
+
+  ask actives [
+    if (delta-resource < 0) and (delta-individual-consumption < 0)
+      [ set reinforcement 1 ]
+  ]
+
+  ask evangelists [
+    if (delta-resource < 0) and (delta-individual-consumption < 0)
+      [ set reinforcement 1 ]
+  ]
+
+  ; social norm part of the model, world-wide trends in sustainability behavior
+  let turtles-reinforcement-pos count turtles with [ reinforcement = 1 ]
+  let turtles-reinforcement-neg count turtles with [ reinforcement = -1 ]
+
+  ifelse (ticks > 4) and (delta-resource < 0) and (((count actives with [ delta-individual-consumption <= 0 ]) + (count evangelists with [ delta-individual-consumption <= 0] )) / total-agent-number) > 0.1 and (turtles-reinforcement-pos > turtles-reinforcement-neg)
+    [ set sustainability-tipping-point true ]
+    [ set sustainability-tipping-point false ]
+
+  ifelse (ticks > 4) and (delta-resource > 0) and ((count blinds with [ delta-individual-consumption > 0 ]) / total-agent-number) > 0.1 and (turtles-reinforcement-pos < turtles-reinforcement-neg)
+    [ set unsustainability-tipping-point true ]
+    [ set unsustainability-tipping-point false ]
+
+end
